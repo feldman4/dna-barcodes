@@ -19,4 +19,4 @@ python barcode_design.py -h
 python barcode_design.py
 ```
 
-[example](example.png)
+![example](example.png)
