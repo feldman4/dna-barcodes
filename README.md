@@ -1,7 +1,7 @@
 # dna-barcodes
 
-Generate DNA barcode sets with guaranteed minimum Levenshtein edit distance between any two barcodes. 
-These barcodes can be used to detect and correct sequencing errors when embedded in known sequence, such as barcoded primers or vectors.
+Generate DNA barcode sets with guaranteed minimum edit distance between any two barcodes. 
+Levenshtein string distance is used, so error-correction and detection are applicable when the barcode is embedded in a known sequence, such as a barcoded primer or vector.
 Similar to [DNABarcodes](https://www.bioconductor.org/packages/release/bioc/html/DNABarcodes.html), but may yield larger barcode sets. 
 
 ## Install
