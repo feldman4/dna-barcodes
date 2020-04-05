@@ -5,7 +5,7 @@ Levenshtein string distance is used, so error-correction and detection are appli
 Similar to [DNABarcodes](https://www.bioconductor.org/packages/release/bioc/html/DNABarcodes.html), but may yield larger barcode sets. 
 
 ## Install
-Requires python 3.6 or higher. The example below uses conda, available here (https://docs.conda.io/en/latest/miniconda.html).
+Requires python 3.6 or higher. The example below uses conda, available [here](https://docs.conda.io/en/latest/miniconda.html).
 
 ```
 conda create -n dnabarcodes python=3.6
