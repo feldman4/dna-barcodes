@@ -19,4 +19,5 @@ python barcode_design.py -h
 python barcode_design.py
 ```
 
-![example](example.png | width=200)
+<img src="example.png" width="200">
+
