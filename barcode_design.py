@@ -113,7 +113,7 @@ def parse_args():
 
     parser.add_argument('--distance', type=int, default=2,
         help='minimum pairwise edit distance')
-    parser.add_argument('--length', type=int, default=6, 
+    parser.add_argument('--length', type=int, default=7, 
         help='barcode length')
     parser.add_argument('--gc_min', type=int, default=30,
         help='minimum GC percentage')
