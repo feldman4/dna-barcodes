@@ -57,9 +57,7 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, avoid=None,
     df_bcs = (pd.DataFrame({'barcode': generate_all_barcodes(n)})
      .assign(gc=lambda x: x['barcode'].apply(calculate_gc))
     )
-    if avoid is not None:
-        keep = [not any(x in bc for x in avoid) for bc in df_bcs['barcode']]
-        df_bcs = df_bcs[keep]
+
     logger.info(f'Generated {len(df_bcs)} barcodes of length {n}')
 
     barcodes = (df_bcs
@@ -67,8 +65,15 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, avoid=None,
      .loc[lambda x: ~(x['barcode'].apply(lambda y:
         has_homopolymer(y, homopolymer)))]
      ['barcode'].pipe(list))
+
     logger.info(f'Retained {len(barcodes)} barcodes after '
         'filtering for GC content and homopolymers')
+
+    if avoid is not None:
+        barcodes = [bc if not any(x in bc for x in avoid) 
+                    for bc in barcodes]
+        logger.info(f'Retained {len(barcodes)} barcodes after '
+            'avoiding provided kmers')
 
     if limit:
         rs = np.random.RandomState(0)
@@ -160,10 +165,9 @@ def handle_failures(barcodes, k, max_to_check=1e6, num_failures_to_print=10):
 
 def main():
     args = parse_args()
-    print(args.avoid)
+    
     logging.basicConfig(format='%(asctime)s -- %(message)s',
                    datefmt='%Y-%m-%d %H:%M:%S')
-
     logging_level = args.verbosity * 10
     logging.root.setLevel(logging_level)
     logging.root.handlers[0].addFilter(lambda x: 'NumExpr' not in x.msg)
