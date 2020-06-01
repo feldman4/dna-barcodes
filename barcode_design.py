@@ -51,12 +51,15 @@ def calculate_gc(s):
     return (s.count('G') + s.count('C')) / len(s)
 
 
-def create_barcode_set(n, k, homopolymer, gc_min, gc_max, 
+def create_barcode_set(n, k, homopolymer, gc_min, gc_max, avoid=None,
     limit=None, progress=tqdm):
 
     df_bcs = (pd.DataFrame({'barcode': generate_all_barcodes(n)})
      .assign(gc=lambda x: x['barcode'].apply(calculate_gc))
     )
+    if avoid is not None:
+        keep = [not any(x in bc for x in avoid) for bc in df_bcs['barcode']]
+        df_bcs = df_bcs[keep]
     logger.info(f'Generated {len(df_bcs)} barcodes of length {n}')
 
     barcodes = (df_bcs
@@ -127,8 +130,10 @@ def parse_args():
         help='maximum number of barcode pairs to verify edit distance')
     parser.add_argument('--verbosity', type=int, default=2,
         help='logging level: <=2 logs info, <=3 logs warnings')
+    parser.add_argument('--avoid', type=str, default='',
+        help='list of subsequences to avoid, e.g., "--avoid=GTTC,GAAC')
 
-    return parser.parse_args()  
+    return parser.parse_args()
 
 
 def handle_failures(barcodes, k, max_to_check=1e6, num_failures_to_print=10):
@@ -155,6 +160,7 @@ def handle_failures(barcodes, k, max_to_check=1e6, num_failures_to_print=10):
 
 def main():
     args = parse_args()
+    print(args.avoid)
     logging.basicConfig(format='%(asctime)s -- %(message)s',
                    datefmt='%Y-%m-%d %H:%M:%S')
 
@@ -164,8 +170,10 @@ def main():
     progress = tqdm.tqdm if logging_level <= 20 else None
 
     limit = None if args.limit == 0 else args.limit
+    avoid = None if args.avoid == '' else args.avoid.split(',')
     df_bcs = create_barcode_set(args.length, args.distance, args.homopolymer, 
-        args.gc_min/100, args.gc_max/100, limit=limit, progress=progress)
+        args.gc_min/100, args.gc_max/100, 
+        avoid=avoid, limit=limit, progress=progress)
 
     failures = handle_failures(
         df_bcs['barcode'], args.distance, args.max_to_check)
