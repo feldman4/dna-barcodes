@@ -26,7 +26,8 @@ from collections import Counter, defaultdict
 from itertools import product
 import logging
 import os
-import re
+import multiprocessing.pool
+import regex as re
 import time
 
 import Levenshtein
@@ -51,8 +52,8 @@ def calculate_gc(s):
     return (s.count('G') + s.count('C')) / len(s)
 
 
-def create_barcode_set(n, k, homopolymer, gc_min, gc_max, avoid=None,
-    limit=None, progress=tqdm):
+def create_barcode_set(n, k, homopolymer, gc_min, gc_max, exclude=None,
+    limit=None, progress=tqdm, cores=1):
 
     df_bcs = (pd.DataFrame({'barcode': generate_all_barcodes(n)})
      .assign(gc=lambda x: x['barcode'].apply(calculate_gc))
@@ -69,11 +70,11 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, avoid=None,
     logger.info(f'Retained {len(barcodes)} barcodes after '
         'filtering for GC content and homopolymers')
 
-    if avoid is not None:
-        barcodes = [bc if not any(x in bc for x in avoid) 
-                    for bc in barcodes]
-        logger.info(f'Retained {len(barcodes)} barcodes after '
-            'avoiding provided kmers')
+    if exclude is not None:
+        pat = re.compile(exclude)
+        barcodes = [bc for bc in barcodes if not pat.findall(bc)]
+        logger.info(f'Retained {len(barcodes)} barcodes after removing matches '
+            f'to "{exclude}"')
 
     if limit:
         rs = np.random.RandomState(0)
@@ -81,7 +82,19 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, avoid=None,
     logger.info('Assigning barcodes to hash buckets...')
     hash_buckets = build_khash(barcodes, k)
     logger.info('Calculating distances within buckets...')
-    D = sparse_dist(hash_buckets, k, progress=progress)
+
+    if cores > 1:
+        from multiprocessing import Pool
+        with Pool(processes=cores) as p:
+            do = lambda x: sparse_dist(*x)
+            work = [([x], k, None) for x in hash_buckets]
+            D = {}
+            with progress(total=len(hash_buckets)) as pbar:
+                for d in p.istarmap(sparse_dist, work):
+                    pbar.update()
+                    D.update(d)
+    else:
+        D = sparse_dist(hash_buckets, k, progress=progress)
     cm = sparse_view(barcodes, D)
 
     logger.info(f'Selecting barcodes with minimum edit distance {k}...')
@@ -135,8 +148,12 @@ def parse_args():
         help='maximum number of barcode pairs to verify edit distance')
     parser.add_argument('--verbosity', type=int, default=2,
         help='logging level: <=2 logs info, <=3 logs warnings')
-    parser.add_argument('--avoid', type=str, default='',
-        help='list of subsequences to avoid, e.g., "--avoid=GTTC,GAAC')
+    parser.add_argument('--exclude', type=str, default='',
+        help=('pattern to exclude in barcodes, e.g., --exclude="GTTC|ATTC" '
+            'or --exclude="(?:GTCC){s<2}" (see https://pypi.org/project/regex/ '
+            'for fuzzy matching syntax)'))
+    parser.add_argument('--cores', type=int, default=1,
+        help='number of parallel processes for distance calculation')
 
     return parser.parse_args()
 
@@ -163,9 +180,37 @@ def handle_failures(barcodes, k, max_to_check=1e6, num_failures_to_print=10):
     return failures
 
 
+def istarmap(self, func, iterable, chunksize=1):
+    """https://stackoverflow.com/questions/57354700/starmap-combined-with-tqdm
+    """
+    mpp = multiprocessing.pool
+
+    if self._state != mpp.RUN:
+        raise ValueError("Pool not running")
+
+    if chunksize < 1:
+        raise ValueError(
+            "Chunksize must be 1+, not {0:n}".format(
+                chunksize))
+
+    task_batches = mpp.Pool._get_tasks(func, iterable, chunksize)
+    result = mpp.IMapIterator(self._cache)
+    self._taskqueue.put(
+        (
+            self._guarded_task_generation(result._job,
+                                          mpp.starmapstar,
+                                          task_batches),
+            result._set_length
+        ))
+    return (item for chunk in result for item in chunk)
+
+
+multiprocessing.pool.Pool.istarmap = istarmap
+
+
 def main():
     args = parse_args()
-    
+
     logging.basicConfig(format='%(asctime)s -- %(message)s',
                    datefmt='%Y-%m-%d %H:%M:%S')
     logging_level = args.verbosity * 10
@@ -174,10 +219,10 @@ def main():
     progress = tqdm.tqdm if logging_level <= 20 else None
 
     limit = None if args.limit == 0 else args.limit
-    avoid = None if args.avoid == '' else args.avoid.split(',')
+    exclude = None if args.exclude == '' else args.exclude
     df_bcs = create_barcode_set(args.length, args.distance, args.homopolymer, 
         args.gc_min/100, args.gc_max/100, 
-        avoid=avoid, limit=limit, progress=progress)
+        cores=args.cores, exclude=exclude, limit=limit, progress=progress)
 
     failures = handle_failures(
         df_bcs['barcode'], args.distance, args.max_to_check)
