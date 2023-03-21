@@ -62,7 +62,7 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, exclude=None,
     logger.info(f'Generated {len(df_bcs)} barcodes of length {n}')
 
     barcodes = (df_bcs
-     .query('@gc_min < gc < @gc_max')
+     .query('@gc_min <= gc <= @gc_max')
      .loc[lambda x: ~(x['barcode'].apply(lambda y:
         has_homopolymer(y, homopolymer)))]
      ['barcode'].pipe(list))
