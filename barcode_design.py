@@ -25,8 +25,7 @@ import argparse
 from collections import Counter, defaultdict
 from itertools import product
 import logging
-import os
-import multiprocessing.pool
+import multiprocessing.pool as mpp
 import regex as re
 import time
 
@@ -34,7 +33,7 @@ import Levenshtein
 import numpy as np
 import pandas as pd
 import scipy.sparse
-import tqdm
+from tqdm.auto import tqdm
 
 
 logger = logging.getLogger(__name__)
@@ -54,7 +53,9 @@ def calculate_gc(s):
 
 def create_barcode_set(n, k, homopolymer, gc_min, gc_max, exclude=None,
     limit=None, progress=tqdm, cores=1):
-
+    if 1 < max(gc_min, gc_max):
+        print('Reminder: gc_min and gc_max parameters are on a 0..1 scale')
+    
     df_bcs = (pd.DataFrame({'barcode': generate_all_barcodes(n)})
      .assign(gc=lambda x: x['barcode'].apply(calculate_gc))
     )
@@ -86,7 +87,6 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, exclude=None,
     if cores > 1:
         from multiprocessing import Pool
         with Pool(processes=cores) as p:
-            do = lambda x: sparse_dist(*x)
             work = [([x], k, None) for x in hash_buckets]
             D = {}
             with progress(total=len(hash_buckets)) as pbar:
@@ -110,6 +110,35 @@ def create_barcode_set(n, k, homopolymer, gc_min, gc_max, exclude=None,
                 gc_min=gc_min, gc_max=gc_max))
 
 
+def prune(barcodes, k, cores=1, progress=tqdm):
+    logger.info('Assigning barcodes to hash buckets...')
+    hash_buckets = build_khash(barcodes, k)
+    logger.info('Calculating distances within buckets...')
+
+    if cores > 1:
+        from multiprocessing import Pool
+        with Pool(processes=cores) as p:
+            work = [([x], k, None) for x in hash_buckets]
+            D = {}
+            with progress(total=len(hash_buckets)) as pbar:
+                for d in p.istarmap(sparse_dist, work):
+                    pbar.update()
+                    D.update(d)
+    else:
+        D = sparse_dist(hash_buckets, k, progress=progress)
+    cm = sparse_view(barcodes, D)
+
+    logger.info(f'Selecting barcodes with minimum edit distance {k}...')
+    group_ids = [0] * len(barcodes)
+    selected = maxy_clique_groups(cm, group_ids)
+
+    selected_barcodes = [barcodes[x] for x in selected]
+    logger.info(f'Selected {len(selected_barcodes)} barcodes')
+
+    return selected_barcodes
+
+
+
 def check_barcode_set(barcodes, k, distance='Levenshtein', max_to_check=1e6):
     """Returns list of barcode pairs that fail to satisfy distance k.
     Default distance is 
@@ -129,7 +158,7 @@ def check_barcode_set(barcodes, k, distance='Levenshtein', max_to_check=1e6):
 
 
 def parse_args():
-    description = 'Design DNA barcodes with guaranteed edit distance'
+    description = 'Design DNA barcodes with guaranteed Levenshtein edit distance'
     parser = argparse.ArgumentParser(description=description)
 
     parser.add_argument('--distance', type=int, default=2,
@@ -166,7 +195,7 @@ def handle_failures(barcodes, k, max_to_check=1e6, num_failures_to_print=10):
     if failures:
         logger.warning('!! Failures detected !!')
         
-        for failure in range(num_failures_to_print):
+        for failure in failures[:num_failures_to_print]:
             logger.warning('{} {} distance={}'.format(*failure))
         if len(failures) > num_failures_to_print:
             logger.warning('...')
@@ -183,18 +212,14 @@ def handle_failures(barcodes, k, max_to_check=1e6, num_failures_to_print=10):
 def istarmap(self, func, iterable, chunksize=1):
     """https://stackoverflow.com/questions/57354700/starmap-combined-with-tqdm
     """
-    mpp = multiprocessing.pool
-
-    if self._state != mpp.RUN:
-        raise ValueError("Pool not running")
-
+    self._check_running()
     if chunksize < 1:
         raise ValueError(
             "Chunksize must be 1+, not {0:n}".format(
                 chunksize))
 
     task_batches = mpp.Pool._get_tasks(func, iterable, chunksize)
-    result = mpp.IMapIterator(self._cache)
+    result = mpp.IMapIterator(self)
     self._taskqueue.put(
         (
             self._guarded_task_generation(result._job,
@@ -205,7 +230,7 @@ def istarmap(self, func, iterable, chunksize=1):
     return (item for chunk in result for item in chunk)
 
 
-multiprocessing.pool.Pool.istarmap = istarmap
+mpp.Pool.istarmap = istarmap
 
 
 def main():
@@ -216,7 +241,7 @@ def main():
     logging_level = args.verbosity * 10
     logging.root.setLevel(logging_level)
     logging.root.handlers[0].addFilter(lambda x: 'NumExpr' not in x.msg)
-    progress = tqdm.tqdm if logging_level <= 20 else None
+    progress = tqdm if logging_level <= 20 else None
 
     limit = None if args.limit == 0 else args.limit
     exclude = None if args.exclude == '' else args.exclude
