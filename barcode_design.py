@@ -393,7 +393,7 @@ def maxy_clique_groups(cm, group_ids, verbose=False):
             index = None
 
         # keep index
-        if index:
+        if index is not None:
             selected.append(index)
             d3[id_] += 1
             available = available[available != index]
